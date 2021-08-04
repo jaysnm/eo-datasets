@@ -139,7 +139,7 @@ def _odc_links(
             yield {
                 "rel": "collection",
                 "href": urljoin(
-                    explorer_base_url, f"/stac/collections/{dataset.product.name}"
+                    explorer_base_url, f"/collections/{dataset.product.name}"
                 ),
             }
         yield {

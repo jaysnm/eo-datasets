@@ -44,6 +44,9 @@ def run(
         name = input_metadata.stem.replace(".odc-metadata", "")
         output_path = input_metadata.with_name(f"{name}.stac-item.json")
 
+        if stac_base_url is not None:
+            stac_base_url = f"{stac_base_url}/{name}/"
+
         # Create STAC dict
         item_doc = dc_to_stac(
             dataset,
