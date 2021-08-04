@@ -297,12 +297,13 @@ def _iter_bands_paths(product_doc: Dict) -> Generator[Tuple[str, str], None, Non
     for name, filepath in product_doc.items():
         if not name.startswith(prefix):
             continue
-        usgs_band_id = name[len(prefix) :]
+        usgs_band_id = name[len(prefix):]
         yield usgs_band_id, filepath
 
 
 def prepare_and_write(
     ds_path: Path,
+    product_name: str,
     output_yaml_path: Path,
     source_telemetry: Path = None,
     # TODO: Can we infer producer automatically? This is bound to cause mistakes othewise
@@ -400,6 +401,9 @@ def prepare_and_write(
         p.instrument = mtl_doc[coll_map["image_attributes"]]["sensor_id"]
         p.product_family = "level" + leveln_landsat_data_type[1]
         p.producer = producer
+        # use product name from user input if provided
+        if product_name is not None:
+            p.names.product_name = product_name
         p.datetime = "{}T{}".format(
             mtl_doc[coll_map["image_attributes"]]["date_acquired"],
             mtl_doc[coll_map["image_attributes"]]["scene_center_time"],
@@ -502,6 +506,12 @@ def prepare_and_write(
     type=PathPath(exists=True, writable=True, dir_okay=True, file_okay=False),
 )
 @click.option(
+    "--product",
+    help="Specify product name against which the dataset will be indexed",
+    required=False,
+    default=None,
+)
+@click.option(
     "--source",
     "source_telemetry",
     help="Path to the source telemetry data for all of the provided datasets"
@@ -532,6 +542,7 @@ def prepare_and_write(
 )
 def main(
     output_base: Optional[Path],
+    product: str,
     datasets: List[Path],
     overwrite_existing: bool,
     producer: str,
@@ -575,6 +586,7 @@ def main(
 
             output_uuid, output_path = prepare_and_write(
                 ds_path,
+                product,
                 output_yaml,
                 producer=producer,
                 source_telemetry=source_telemetry,
