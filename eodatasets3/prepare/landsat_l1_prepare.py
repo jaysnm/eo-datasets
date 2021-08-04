@@ -561,7 +561,7 @@ def main(
                 output.mkdir(parents=True, exist_ok=True)
             else:
                 # Alongside the dataset itself.
-                output = ds.absolute().parent
+                output = ds.absolute()
 
             ds_path = _normalise_dataset_path(Path(ds).absolute())
             (mode, ino, dev, nlink, uid, gid, size, atime, mtime, ctime) = os.stat(ds)
