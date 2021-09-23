@@ -5,7 +5,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urljoin
 from uuid import UUID
 
 import click
@@ -44,9 +43,6 @@ def run(
         name = input_metadata.stem.replace(".odc-metadata", "")
         output_path = input_metadata.with_name(f"{name}.stac-item.json")
 
-        if stac_base_url is not None:
-            stac_base_url = f"{stac_base_url}/{name}/"
-
         # Create STAC dict
         item_doc = dc_to_stac(
             dataset,
@@ -82,7 +78,9 @@ def dc_to_stac(
     It's better to call eodatasets3.stac.to_stac_item() directly.
     """
 
-    stac_destination_url = urljoin(stac_base_url, output_path.name)
+    stac_destination_url = (
+        f"{stac_base_url}/{output_path.parent.name}/{output_path.name}"
+    )
 
     # Following previous behaviour -- fallback to the stac destination path.
     dataset_location = (
@@ -96,7 +94,7 @@ def dc_to_stac(
         #     We just assume that they're uploading the odc document to the
         #     same public folder (and with the same name.)
         #     But we need to keep it for backwards compatibility.
-        odc_dataset_metadata_url=urljoin(stac_base_url, input_metadata.name),
+        odc_dataset_metadata_url=f"{stac_base_url}/{input_metadata.parent.name}/{input_metadata.name}",
         explorer_base_url=explorer_base_url,
         dataset_location=dataset_location,
     )
