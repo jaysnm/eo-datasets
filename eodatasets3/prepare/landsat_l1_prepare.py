@@ -389,12 +389,12 @@ def prepare_and_write(
         dataset_id=uuid.uuid5(USGS_UUID_NAMESPACE, leveln_product_id),
         naming_conventions="dea",
     ) as p:
-        if source_telemetry:
-            if producer != "ga.gov.au":
-                raise NotImplementedError(
-                    "Only GA's L1 data is expected to have telemetry source data?"
-                )
-            p.add_source_path(source_telemetry)
+        # if source_telemetry:
+        #     if producer != "ga.gov.au":
+        #         raise NotImplementedError(
+        #             "Only GA's L1 data is expected to have telemetry source data?"
+        #         )
+        #     p.add_source_path(source_telemetry)
 
         p.platform = mtl_doc[coll_map["image_attributes"]]["spacecraft_id"]
         p.instrument = mtl_doc[coll_map["image_attributes"]]["sensor_id"]
@@ -403,6 +403,9 @@ def prepare_and_write(
         # use product name from user input if provided
         if product_name is not None:
             p.names.product_name = product_name
+        # set product label USGS's way
+        if producer == "usgs.gov":
+            p.names.dataset_label = ds_path.name
         p.datetime = "{}T{}".format(
             mtl_doc[coll_map["image_attributes"]]["date_acquired"],
             mtl_doc[coll_map["image_attributes"]]["scene_center_time"],
