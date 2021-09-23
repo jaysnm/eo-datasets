@@ -1,63 +1,78 @@
-FROM opendatacube/geobase:wheels as env_builder
-ARG py_env_path=/env
-ARG ENVIRONMENT=test
+FROM osgeo/gdal:ubuntu-small-3.3.2
 
-COPY requirements /tmp/requirements
-# RUN env-build-tool new /tmp/requirements.txt ${py_env_path}
-RUN if [ "$ENVIRONMENT" = "test" ] ; then \
-        rm /wheels/rasterio*whl ; \
-        env-build-tool new /tmp/requirements/docker-dev.txt ${py_env_path} ; \
-    else \
-        env-build-tool new /tmp/requirements/main.txt ${py_env_path} ; \
-    fi
-
-ENV PATH=${py_env_path}/bin:$PATH
-
-
-# Build the production runner stage from here
-FROM opendatacube/geobase:runner
-ARG ENVIRONMENT=test
-
-ENV LC_ALL=C.UTF-8 \
-    DEBIAN_FRONTEND=noninteractive \
-    SHELL=bash \
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8 \
     PYTHONFAULTHANDLER=1
 
-RUN useradd --create-home runner
+# Apt installation
+RUN apt-get update && \
+    apt-get install -y \
+      build-essential \
+      git \
+      vim \
+      nano \
+      tini \
+      wget \
+      python3-pip \
+      # For Psycopg2
+      libpq-dev python-dev \
+    && apt-get autoclean && \
+    apt-get autoremove && \
+    rm -rf /var/lib/{apt,dpkg,cache,log}
 
-COPY --from=env_builder /env /env
-ENV PATH=/env/bin:$PATH
 
-RUN if [ "$ENVIRONMENT" = "test" ] ; then \
-	apt-get update \
-	    # Git for pre-commit linting, make+libpq for pip-tools dependency calc.
-	    && apt-get install --no-install-recommends -y git vim make libpq-dev \
-	    && rm -rf /var/lib/apt/lists/* ; \
-    fi
+# Environment can be whatever is supported by setup.py
+# so, either deployment, test
+ARG ENVIRONMENT=test
+# ARG ENVIRONMENT=deployment
+
+RUN echo "Environment is: $ENVIRONMENT"
+
+RUN pip install pip-tools pre-commit pytest-cov
+
+# Pip installation
+RUN mkdir -p /conf
+COPY requirements /conf/
+RUN pip install -r /conf/${ENVIRONMENT}.txt
+
+# USER runner ?
 
 # Dev setup: run pre-commit once, so its virtualenv is built and cached.
 #    We do this in a tmp repository, before copying our real code, as we
 #    want this cached by Docker and not rebuilt every time code changes
-COPY .pre-commit-config.yaml /tmp/
-USER runner
+COPY .pre-commit-config.yaml /conf/
+
 RUN if [ "$ENVIRONMENT" = "test" ] ; then \
        mkdir -p ~/pre-commit \
-       && cp /tmp/.pre-commit-config.yaml ~/pre-commit \
+       && cp /conf/.pre-commit-config.yaml ~/pre-commit \
        && cd ~/pre-commit \
        && git init \
        && pre-commit run \
        && rm -rf ~/pre-commit ; \
     fi
 
-# Copy source code and install it
-WORKDIR /code
-COPY . .
 
-USER root
-RUN pip install --no-cache-dir --disable-pip-version-check --use-feature=2020-resolver .
-USER runner
+# Set up a nice workdir and add the live code
+ENV APPDIR=/code
+RUN mkdir -p $APPDIR
+WORKDIR $APPDIR
+ADD . $APPDIR
+
+# These ENVIRONMENT flags make this a bit complex, but basically, if we are in dev
+# then we want to link the source (with the -e flag) and if we're in prod, we
+# want to delete the stuff in the /code folder to keep it simple.
+RUN if [ "$ENVIRONMENT" = "deployment" ] ; then\
+        pip install .[$ENVIRONMENT] ; \
+        rm -rf /code/* ; \
+    else \
+        pip install --editable .[$ENVIRONMENT] ; \
+    fi
+
+RUN pip freeze
 
 # Is it working?
 RUN eo3-validate --version
 
-CMD ["python"]
+ENTRYPOINT ["/bin/tini", "--"]
+CMD ["eo3-validate"]

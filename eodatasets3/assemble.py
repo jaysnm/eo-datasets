@@ -7,9 +7,9 @@ import uuid
 import warnings
 from copy import deepcopy
 from enum import Enum, auto
-from pathlib import Path, PurePath, PosixPath
+from pathlib import Path, PosixPath, PurePath
 from textwrap import dedent
-from typing import Dict, List, Optional, Tuple, Generator, Any, Iterable, Union
+from typing import Any, Dict, Generator, Iterable, List, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 import numpy
@@ -21,17 +21,12 @@ from rasterio.enums import Resampling
 from shapely.geometry.base import BaseGeometry
 
 import eodatasets3
-from eodatasets3 import serialise, validate, images, documents
+from eodatasets3 import documents, images, serialise, validate
 from eodatasets3.documents import find_and_read_documents
 from eodatasets3.images import FileWrite, GridSpec, MeasurementBundler
-from eodatasets3.model import (
-    DatasetDoc,
-    ProductDoc,
-    Location,
-    AccessoryDoc,
-)
-from eodatasets3.names import NamingConventions, namer, resolve_location, dc_uris
-from eodatasets3.properties import Eo3Interface, Eo3Dict
+from eodatasets3.model import AccessoryDoc, DatasetDoc, Location, ProductDoc
+from eodatasets3.names import NamingConventions, dc_uris, namer, resolve_location
+from eodatasets3.properties import Eo3Dict, Eo3Interface
 from eodatasets3.validate import Level, ValidationMessage
 from eodatasets3.verify import PackageChecksum
 
@@ -442,6 +437,17 @@ class DatasetPrepare(Eo3Interface):
         ...
 
     @property
+    def collection_location(self) -> Path:
+        # Backward compat method. No docstring to avoid sphinx visibility.
+        return self.names.collection_path
+
+    @collection_location.setter
+    def collection_location(self, val: Path):
+        # Backward compat method. No docstring to avoid sphinx visibility.
+        # Previously, people could set the collection using this property, and it was a Path
+        self.names.collection_prefix = resolve_location(val)
+
+    @property
     def dataset_id(self) -> uuid.UUID:
         return self._dataset.id
 
@@ -457,9 +463,9 @@ class DatasetPrepare(Eo3Interface):
 
     @property
     def measurements(self) -> Dict[str, Tuple[GridSpec, Path]]:
-        return dict(
-            (name, (grid, path)) for grid, name, path in self._measurements.iter_paths()
-        )
+        return {
+            name: (grid, path) for grid, name, path in self._measurements.iter_paths()
+        }
 
     @property
     def label(self) -> Optional[str]:
@@ -553,6 +559,7 @@ class DatasetPrepare(Eo3Interface):
         classifier: Optional[str] = None,
         auto_inherit_properties: bool = False,
         inherit_geometry: bool = False,
+        inherit_skip_properties: Optional[str] = None,
     ):
         """
         Record a source dataset using its metadata document.
@@ -575,6 +582,10 @@ class DatasetPrepare(Eo3Interface):
                             data, which can be very computationally expensive e.g. Landsat 7
                             striped data, use the valid data geometry from this source dataset.
 
+        :param inherit_skip_properties: An extra list of property names that should not be copied.
+                                        This is useful when generating summaries which combine multiple
+                                        input source datasets.
+
         See :meth:`.add_source_path` if you have a filepath reference instead of a document.
 
         """
@@ -591,7 +602,7 @@ class DatasetPrepare(Eo3Interface):
         _validate_property_name(classifier)
         self._dataset.lineage.setdefault(classifier, []).append(dataset.id)
         if auto_inherit_properties:
-            self._inherit_properties_from(dataset)
+            self._inherit_properties_from(dataset, inherit_skip_properties)
         if inherit_geometry:
             if self.geometry and self.geometry != dataset.geometry:
                 warnings.warn("Overriding existing geometry from source dataset")
@@ -635,8 +646,21 @@ class DatasetPrepare(Eo3Interface):
                     ) from v
             self._dataset.lineage.setdefault(classifier, []).append(dataset_id)
 
-    def _inherit_properties_from(self, source_dataset: DatasetDoc):
+    def _inherit_properties_from(
+        self,
+        source_dataset: DatasetDoc,
+        inherit_skip_properties: Optional[List[str]] = None,
+    ):
+
+        if not inherit_skip_properties:
+            # change the inherit_skip_properties to [] if it is None. Make the 'in list check' easier.
+            inherit_skip_properties = []
+
         for name in self.INHERITABLE_PROPERTIES:
+            if name in inherit_skip_properties:
+                # if we plan to skip this property, skip it immediately.
+                continue
+
             if name not in source_dataset.properties:
                 continue
             new_value = source_dataset.properties[name]
@@ -1414,7 +1438,7 @@ class DatasetAssembler(DatasetPrepare):
                 )
             )
         rgbs = [self.measurements[b] for b in (red, green, blue)]
-        unique_grids: List[GridSpec] = list(set(grid for grid, path in rgbs))
+        unique_grids: List[GridSpec] = list({grid for grid, path in rgbs})
         if len(unique_grids) != 1:
             raise NotImplementedError(
                 "Thumbnails can only currently be created from measurements of the same grid spec."
@@ -1578,7 +1602,7 @@ class DatasetAssembler(DatasetPrepare):
                 "being ignored).",
                 category=DeprecationWarning,
             )
-            return super(DatasetAssembler, self).done(
+            return super().done(
                 embed_location=embed_location,
                 validate_correctness=validate_correctness,
                 sort_measurements=sort_measurements,
@@ -1672,6 +1696,9 @@ class DatasetAssembler(DatasetPrepare):
                 )
 
         target_metadata_path = self._target_metadata_path()
-        assert target_metadata_path.exists()
+        if not target_metadata_path.exists():
+            raise RuntimeError(
+                f"Internal error: expected metadata path result: {target_metadata_path}"
+            )
         self._is_completed = True
         return dataset.id, target_metadata_path

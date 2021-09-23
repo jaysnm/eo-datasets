@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from functools import partial
 from pathlib import Path, PurePath
-from typing import Dict, Tuple, Text, IO, Union, Iterable, Mapping
+from typing import IO, Dict, Iterable, Mapping, Tuple, Union
 from uuid import UUID
 
 import attr
@@ -21,11 +22,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
-from eodatasets3.model import (
-    DatasetDoc,
-    ODC_DATASET_SCHEMA_URL,
-    Eo3Dict,
-)
+from eodatasets3.model import ODC_DATASET_SCHEMA_URL, DatasetDoc, Eo3Dict
 from eodatasets3.properties import FileFormat
 
 
@@ -98,7 +95,7 @@ def _init_yaml() -> YAML:
 def dump_yaml(output_yaml: Path, *docs: Mapping) -> None:
     if not output_yaml.name.lower().endswith(".yaml"):
         raise ValueError(
-            "YAML filename doesn't end in *.yaml (?). Received {!r}".format(output_yaml)
+            f"YAML filename doesn't end in *.yaml (?). Received {output_yaml!r}"
         )
 
     yaml = _init_yaml()
@@ -120,7 +117,7 @@ def _yaml():
     return YAML(typ="safe")
 
 
-def loads_yaml(stream: Union[Text, IO]) -> Iterable[Dict]:
+def loads_yaml(stream: Union[str, IO]) -> Iterable[Dict]:
     """Dump yaml through a stream, using the default deserialisation settings."""
     return _yaml().load_all(stream)
 
@@ -191,7 +188,9 @@ METADATA_TYPE_SCHEMA = _load_schema_validator(
 )
 
 
-def from_doc(doc: Dict, skip_validation=False) -> DatasetDoc:
+def from_doc(
+    doc: Dict, skip_validation=False, normalise_properties=False
+) -> DatasetDoc:
     """
     Parse a dictionary into an EO3 dataset.
 
@@ -216,7 +215,10 @@ def from_doc(doc: Dict, skip_validation=False) -> DatasetDoc:
     c = cattr.Converter()
     c.register_structure_hook(uuid.UUID, _structure_as_uuid)
     c.register_structure_hook(BaseGeometry, _structure_as_shape)
-    c.register_structure_hook(Eo3Dict, _structure_as_stac_props)
+    c.register_structure_hook(
+        Eo3Dict,
+        partial(_structure_as_stac_props, normalise_properties=normalise_properties),
+    )
 
     c.register_structure_hook(Affine, _structure_as_affine)
 
@@ -228,9 +230,18 @@ def _structure_as_uuid(d, t):
     return uuid.UUID(str(d))
 
 
-def _structure_as_stac_props(d, t):
-    # We don't normalise properties as we want it to reflect the original file.
-    return Eo3Dict(d, normalise_input=False)
+def _structure_as_stac_props(d, t, normalise_properties=False):
+    """
+    :param normalise_properties:
+        We don't normalise properties by default as we usually want it to reflect the original file.
+
+    """
+    return Eo3Dict(
+        # The passed-in dictionary is stored internally, so we want to make a copy of it
+        # so that our serialised output is fully separate from the input.
+        dict(d),
+        normalise_input=normalise_properties,
+    )
 
 
 def _structure_as_affine(d: Tuple, t):

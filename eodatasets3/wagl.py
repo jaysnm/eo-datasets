@@ -9,22 +9,23 @@ import contextlib
 import os
 import re
 import sys
-from datetime import timedelta, datetime
+from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
-from typing import List, Sequence, Optional, Iterable, Any, Tuple, Dict
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 import attr
 import numpy
 import rasterio
 from affine import Affine
-from boltons.iterutils import get_path, PathAccessError
+from boltons.iterutils import PathAccessError, get_path
 from click import secho
 from rasterio import DatasetReader
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 
-from eodatasets3 import serialise, utils, images, DatasetAssembler
+from eodatasets3 import DatasetAssembler, images, serialise, utils
 from eodatasets3.images import GridSpec
 from eodatasets3.model import DatasetDoc
 from eodatasets3.properties import Eo3Interface
@@ -58,6 +59,11 @@ FILENAME_TIF_BAND = re.compile(
 PRODUCT_SUITE_FROM_GRANULE = re.compile("(L1[GTPCS]{1,2})")
 
 
+class ProductMaturity(Enum):
+    provisional = "provisional"
+    stable = "stable"
+
+
 def _find_h5_paths(h5_obj: h5py.Group, dataset_class: str = "") -> List[str]:
     """
     Find all objects in a h5 of the given class, returning their path.
@@ -85,9 +91,7 @@ def _unpack_products(
 
     for product in product_list:
         with sub_product(product, p):
-            for pathname in [
-                p for p in img_paths if "/{}/".format(product.upper()) in p
-            ]:
+            for pathname in [p for p in img_paths if f"/{product.upper()}/" in p]:
 
                 with do(f"Path {pathname!r}"):
                     dataset = h5group[pathname]
@@ -574,6 +578,8 @@ def package_file(
 def package(
     out_directory: Path,
     granule: Granule,
+    *,
+    product_maturity: ProductMaturity = ProductMaturity.stable,
     included_products: Iterable[str] = DEFAULT_PRODUCTS,
     include_oa: bool = True,
     oa_resolution: Optional[Tuple[float, float]] = None,
@@ -622,6 +628,12 @@ def package(
                 processed=p.processed,
                 wagl_doc=wagl_doc,
             )
+
+            # We don't bother including product maturity if it's stable, for consistency with old datasets.
+            # Stable is the assumed default.
+            if product_maturity is not ProductMaturity.stable:
+                p.product_maturity = product_maturity
+
             if granule.source_level1_metadata is not None:
                 # For historical consistency: we want to use the instrument that the source L1 product
                 # came from, not the instruments reported from the WAGL doc.
@@ -737,11 +749,11 @@ def find_a_granule_name(wagl_hdf5: Path) -> str:
 
 def _read_wagl_metadata(granule_group: h5py.Group):
     try:
-        wagl_path, *ancil_paths = [
+        wagl_path, *ancil_paths = (
             pth
             for pth in (_find_h5_paths(granule_group, "SCALAR"))
             if "METADATA" in pth
-        ]
+        )
     except ValueError:
         raise ValueError("No nbar metadata found in granule")
 

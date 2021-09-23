@@ -5,22 +5,24 @@ import collections
 import enum
 import math
 import multiprocessing
+import os
 import sys
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from textwrap import indent
 from typing import (
-    List,
     Counter,
     Dict,
     Generator,
-    Optional,
-    Union,
-    Tuple,
-    Sequence,
     Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
 )
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from urllib.request import urlopen
 
 import attr
@@ -29,19 +31,19 @@ import click
 import numpy as np
 import rasterio
 from boltons.iterutils import get_path
-from click import style, echo, secho
+from click import echo, secho, style
 from datacube import Datacube
-from datacube.utils import changes, read_documents, is_url, InvalidDocException
+from datacube.utils import InvalidDocException, changes, is_url, read_documents
 from datacube.utils.documents import load_documents
 from rasterio import DatasetReader
 from rasterio.crs import CRS
 from rasterio.errors import CRSError
 from shapely.validation import explain_validity
 
-from eodatasets3 import serialise, model, utils
+from eodatasets3 import model, serialise, utils
 from eodatasets3.model import DatasetDoc
-from eodatasets3.ui import is_absolute, uri_resolve, bool_style
-from eodatasets3.utils import default_utc, EO3_SCHEMA
+from eodatasets3.ui import bool_style, is_absolute, uri_resolve
+from eodatasets3.utils import EO3_SCHEMA, default_utc
 
 
 class Level(enum.Enum):
@@ -263,7 +265,7 @@ def validate_dataset(
                     f"Product {product_name} expects a measurement {name!r})",
                 )
         measurements_not_in_product = set(dataset.measurements.keys()).difference(
-            set(m["name"] for m in product_definition.get("measurements") or ())
+            {m["name"] for m in product_definition.get("measurements") or ()}
         )
         if (not expect_extra_measurements) and measurements_not_in_product:
             things = ", ".join(sorted(measurements_not_in_product))
@@ -370,7 +372,7 @@ def validate_product(doc: Dict) -> ValidationMessages:
         yield _warning(
             "no_license",
             f"Product {doc['name']!r} has no license field",
-            hint='Eg. "CC-BY-SA-4.0" (SPDX format), "various" or "proprietary"',
+            hint='Eg. "CC-BY-4.0" (SPDX format), "various" or "proprietary"',
         )
 
     # Check measurement name clashes etc.
@@ -542,7 +544,7 @@ def validate_paths(
         yield url, messages
 
 
-def _readable_doc_extension(path: str):
+def _readable_doc_extension(uri: str):
     """
     >>> _readable_doc_extension('something.json.gz')
     '.json.gz'
@@ -550,12 +552,15 @@ def _readable_doc_extension(path: str):
     '.yaml'
     >>> _readable_doc_extension('apple.odc-metadata.yaml.gz')
     '.yaml.gz'
+    >>> _readable_doc_extension('products/tmad/tmad_product.yaml#part=1')
+    '.yaml'
     >>> _readable_doc_extension('/tmp/human.06.tall.yml')
     '.yml'
     >>> # Not a doc, even though it's compressed.
     >>> _readable_doc_extension('db_dump.gz')
     >>> _readable_doc_extension('/tmp/nothing')
     """
+    path = urlparse(uri).path
     compression_formats = (".gz",)
     doc_formats = (
         ".yaml",
@@ -887,6 +892,71 @@ def _has_some_geo(dataset):
     return dataset.geometry is not None or dataset.grids or dataset.crs
 
 
+def display_result_console(
+    url: str, is_valid: bool, messages: List[ValidationMessage], quiet=False
+):
+    """
+    Print validation messages to the Console (using colour if available).
+    """
+    # Otherwise console output, with color if possible.
+    if messages or not quiet:
+        echo(f"{bool_style(is_valid)} {url}")
+
+    for message in messages:
+        hint = ""
+        if message.hint:
+            # Indent the hint if it's multi-line.
+            if "\n" in message.hint:
+                hint = "\t\tHint:\n"
+                hint += indent(message.hint, "\t\t" + (" " * 5))
+            else:
+                hint = f"\t\t(Hint: {message.hint})"
+        s = {
+            Level.info: dict(),
+            Level.warning: dict(fg="yellow"),
+            Level.error: dict(fg="red"),
+        }
+        displayable_code = style(f"{message.code}", **s[message.level], bold=True)
+        echo(f"\t{message.level.name[0].upper()} {displayable_code} {message.reason}")
+        if hint:
+            echo(hint)
+
+
+def display_result_github(url: str, is_valid: bool, messages: List[ValidationMessage]):
+    """
+    Print validation messages using Github Action's command language for warnings/errors.
+    """
+    echo(f"{bool_style(is_valid)} {url}")
+    for message in messages:
+        hint = ""
+        if message.hint:
+            # Indent the hint if it's multi-line.
+            if "\n" in message.hint:
+                hint = "\n\nHint:\n"
+                hint += indent(message.hint, (" " * 5))
+            else:
+                hint = f"\n\n(Hint: {message.hint})"
+
+        if message.level == Level.error:
+            code = "::error"
+        else:
+            code = "::warning"
+
+        text = f"{message.reason}{hint}"
+
+        # URL-Encode any newlines
+        text = text.replace("\n", "%0A")
+        # TODO: Get the real line numbers?
+        echo(f"{code} file={url},line=1::{text}")
+
+
+_OUTPUT_WRITERS = dict(
+    plain=display_result_console,
+    quiet=partial(display_result_console, quiet=True),
+    github=display_result_github,
+)
+
+
 @click.command(
     help=__doc__
     + """
@@ -905,6 +975,16 @@ products first, and datasets later, to ensure they can be matched.
     "strict_warnings",
     is_flag=True,
     help="Fail if any warnings are produced",
+)
+@click.option(
+    "-f",
+    "--output-format",
+    help="Output format",
+    type=click.Choice(list(_OUTPUT_WRITERS)),
+    # Are we in Github Actions?
+    # Send any warnings/errors in its custom format
+    default="github" if "GITHUB_ACTIONS" in os.environ else "plain",
+    show_default=True,
 )
 @click.option(
     "--thorough",
@@ -945,6 +1025,7 @@ def run(
     expect_extra_measurements: bool,
     explorer_url: str,
     use_datacube: bool,
+    output_format: str,
 ):
     validation_counts: Counter[Level] = collections.Counter()
     invalid_paths = 0
@@ -952,11 +1033,9 @@ def run(
 
     product_definitions = _load_remote_product_definitions(use_datacube, explorer_url)
 
-    s = {
-        Level.info: dict(),
-        Level.warning: dict(fg="yellow"),
-        Level.error: dict(fg="red"),
-    }
+    if output_format == "plain" and quiet:
+        output_format = "quiet"
+    write_file_report = _OUTPUT_WRITERS[output_format]
 
     for url, messages in validate_paths(
         paths,
@@ -976,29 +1055,19 @@ def run(
             # Errors/Warnings only. Remove info-level.
             messages = [m for m in messages if m.level != Level.info]
 
-        if messages or not quiet:
-            secho(f"{bool_style(not is_invalid)} {url}")
-
-        if not messages:
-            continue
-
         if is_invalid:
             invalid_paths += 1
 
         for message in messages:
             validation_counts[message.level] += 1
 
-            displayable_code = style(f"{message.code}", **s[message.level], bold=True)
-            echo(
-                f"\t{message.level.name[0].upper()} {displayable_code} {message.reason}"
-            )
-            if message.hint:
-                if "\n" in message.hint:
-                    echo("\t\tHint:")
-                    echo(indent(message.hint, "\t\t" + (" " * 5)))
-                else:
-                    echo(f'\t\t({style("Hint")}: {message.hint})')
+        write_file_report(
+            url=url,
+            is_valid=not is_invalid,
+            messages=messages,
+        )
 
+    # Print a summary on stderr for humans.
     if not quiet:
         result = (
             style("failure", fg="red", bold=True)
@@ -1030,6 +1099,7 @@ def _load_remote_product_definitions(
     if from_explorer_url:
         for definition in _load_explorer_product_definitions(from_explorer_url):
             product_definitions[definition["name"]] = definition
+        secho(f"{len(product_definitions)} Explorer products", err=True)
 
     if from_datacube:
         # The normal datacube environment variables can be used to choose alternative configs.
@@ -1037,7 +1107,7 @@ def _load_remote_product_definitions(
             for product in dc.index.products.get_all():
                 product_definitions[product.name] = product.definition
 
-    secho(f"{len(product_definitions)} ODC products")
+        secho(f"{len(product_definitions)} ODC products", err=True)
     return product_definitions
 
 
@@ -1056,7 +1126,7 @@ def _load_explorer_product_definitions(
     """
     product_urls = [
         urljoin(explorer_url, f"/products/{name.strip()}.odc-product.yaml")
-        for name in urlopen(urljoin(explorer_url, "products.txt"))
+        for name in urlopen(urljoin(explorer_url, "products.txt"))  # nosec
         .read()
         .decode("utf-8")
         .split("\n")

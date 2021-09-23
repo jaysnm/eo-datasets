@@ -8,6 +8,7 @@ import pytest
 from ruamel import yaml
 
 from eodatasets3 import DatasetAssembler, DatasetDoc, namer
+
 from tests.common import assert_expected_eo3_path
 
 
@@ -76,6 +77,29 @@ def test_dea_s2_derivate_names(tmp_path: Path):
         expect_label="esa_s2_eucalyptus_3_55HFA_2018-11-04_final",
         expect_metadata_path="esa_s2_eucalyptus_3/1-2-3/55/HFA/2018/11/04/20201011T011446/"
         "esa_s2_eucalyptus_3_55HFA_2018-11-04_final.odc-metadata.yaml",
+    )
+
+
+def test_minimal_provisional_dea_dataset(tmp_path: Path):
+    assert_names_match(
+        tmp_path,
+        conventions="dea",
+        properties={
+            "eo:platform": "landsat-8",
+            "eo:instrument": "OLI_TIRS",
+            "datetime": datetime(2020, 5, 26),
+            "odc:product_family": "ufo-observations",
+            "odc:processing_datetime": "2018-11-05T12:23:23",
+            "odc:dataset_version": "1.0.0",
+            "odc:producer": "ga.gov.au",
+            "odc:region_code": "088080",
+            "landsat:landsat_scene_id": "LC80880802020146LGN00",
+            # Provisional! It'll be added to the path, right?
+            "dea:product_maturity": "provisional",
+        },
+        expect_label="ga_ls8c_ufo_observations_provisional_1-0-0_088080_2020-05-26",
+        expect_metadata_path="ga_ls8c_ufo_observations_provisional_1/088/080/2020/05/26/"
+        "ga_ls8c_ufo_observations_provisional_1-0-0_088080_2020-05-26.odc-metadata.yaml",
     )
 
 
@@ -234,6 +258,8 @@ def test_dea_interim_folder_calculation(tmp_path: Path):
     """
     with DatasetAssembler(tmp_path, naming_conventions="dea") as p:
         p.platform = "landsat-7"
+        # Should not end up in the path, as it's the default:
+        p.product_maturity = "stable"
         p.instrument = "ETM+"
         p.datetime = datetime(1998, 7, 30)
         p.product_family = "frogs"

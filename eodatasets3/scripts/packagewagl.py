@@ -6,7 +6,7 @@ GeoTIFFS (COGs) with datacube metadata using the DEA naming conventions
 for files.
 """
 from pathlib import Path
-from typing import Sequence, Optional
+from typing import Optional, Sequence
 
 import click
 import rasterio
@@ -14,6 +14,8 @@ from click import secho
 
 from eodatasets3 import wagl
 from eodatasets3.ui import PathPath
+
+DEFAULT_MATURITY = wagl.ProductMaturity.stable
 
 
 @click.command(help=__doc__)
@@ -46,6 +48,13 @@ from eodatasets3.ui import PathPath
     default=True,
 )
 @click.option(
+    "--product-maturity",
+    type=click.Choice(wagl.ProductMaturity.__members__, case_sensitive=False),
+    help=f"Product maturity status (default: {DEFAULT_MATURITY.name})",
+    default=DEFAULT_MATURITY.name,
+    callback=lambda c, p, v: wagl.ProductMaturity[v.lower()] if v else None,
+)
+@click.option(
     "--with-oa/--no-oa",
     "with_oa",
     help="Include observation attributes (default: true)",
@@ -73,11 +82,12 @@ def run(
     h5_file: Path,
     products: Sequence[str],
     with_oa: bool,
+    product_maturity: wagl.ProductMaturity,
     allow_missing_provenance: bool,
     oa_resolution: Optional[float],
 ):
     if products:
-        products = set(p.lower() for p in products)
+        products = {p.lower() for p in products}
     else:
         products = wagl.DEFAULT_PRODUCTS
 
@@ -101,6 +111,7 @@ def run(
                 dataset_id, dataset_path = wagl.package(
                     out_directory=output,
                     granule=granule,
+                    product_maturity=product_maturity,
                     included_products=products,
                     include_oa=with_oa,
                     oa_resolution=oa_resolution,

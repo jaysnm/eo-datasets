@@ -1,14 +1,13 @@
 #!/usr/bin/env python
-# coding=utf-8
 
 import pathlib
 from itertools import chain
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 import versioneer
 
-HERE = pathlib.Path(__file__).parent
+HERE = pathlib.Path(__file__).parent.resolve()
 
 README = (HERE / "README.md").read_text()
 
@@ -33,7 +32,10 @@ EXTRAS_REQUIRE = {
 }
 EXTRAS_REQUIRE["all"] = list(chain(EXTRAS_REQUIRE.values()))
 # Tests need all those optionals too.
+
 EXTRAS_REQUIRE["test"] = EXTRAS_REQUIRE["all"]
+# Prod deployment just adds the optional wagl depenencies.
+EXTRAS_REQUIRE["deployment"] = EXTRAS_REQUIRE["wagl"]
 
 setup(
     name="eodatasets3",
@@ -46,11 +48,14 @@ setup(
     packages=find_packages(exclude=("tests", "tests.*")),
     package_data={"": ["*.json", "*.yaml"]},
     license="Apache Software License 2.0",
+    python_requires=">=3.6",
     classifiers=[
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Operating System :: OS Independent",
     ],
     url="https://github.com/GeoscienceAustralia/eo-datasets",
@@ -58,6 +63,7 @@ setup(
         "affine",
         "attrs>=18.1",  # 18.1 adds 'factory' syntactic sugar
         "boltons",
+        "botocore",  # missing from datacube
         "cattrs",
         "ciso8601",
         "click",
@@ -70,9 +76,10 @@ setup(
         "shapely",
         "structlog",
         "xarray",
-        "requests-cache",
+        "requests-cache>=0.6",
         "datacube",
         "python-rapidjson",
+        "pystac>=1.1.0",
     ],
     tests_require=tests_require,
     extras_require=EXTRAS_REQUIRE,
@@ -84,4 +91,8 @@ setup(
         eo3-package-wagl=eodatasets3.scripts.packagewagl:run
         eo3-to-stac=eodatasets3.scripts.tostac:run
     """,
+    project_urls={
+        "Bug Reports": "https://github.com/GeoscienceAustralia/eo-datasets/issues",
+        "Source": "https://github.com/GeoscienceAustralia/eo-datasets",
+    },
 )

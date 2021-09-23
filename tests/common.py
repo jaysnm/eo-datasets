@@ -10,7 +10,7 @@ from deepdiff.model import DiffLevel
 from ruamel import yaml
 from shapely.geometry.base import BaseGeometry
 
-from eodatasets3 import serialise, DatasetDoc
+from eodatasets3 import DatasetDoc, serialise
 
 
 def check_prepare_outputs(
@@ -183,6 +183,9 @@ def format_doc_diffs(left: Dict, right: Dict) -> Iterable[str]:
         for offset in doc_diffs.tree["dictionary_item_removed"].items:
             offset: DiffLevel
             out.append(f"    {clean_offset(offset.path())} = {repr(offset.t1)}")
+    # Anything we missed from the (sometimes changing) diff api?
+    if len(out) == 1:
+        out.append(repr(doc_diffs))
 
     # If pytest verbose:
     out.extend(("Full output document: ", repr(left)))

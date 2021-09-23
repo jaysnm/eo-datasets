@@ -9,6 +9,7 @@ from uuid import UUID
 
 import click
 from click import echo, style
+from datacube.utils import jsonify_document
 
 import eodatasets3.stac as eo3stac
 from eodatasets3 import serialise
@@ -54,10 +55,10 @@ def run(
         )
 
         if validate:
-            eo3stac.validate_item(item_doc, log=echo if verbose else lambda line: None)
+            eo3stac.validate_item(item_doc)
 
         with output_path.open("w") as f:
-            json.dump(item_doc, f, indent=4, default=json_fallback)
+            json.dump(jsonify_document(item_doc), f, indent=4, default=json_fallback)
 
         if verbose:
             echo(f'Wrote {style(output_path.as_posix(), "green")}')

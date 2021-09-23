@@ -1,21 +1,14 @@
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import (
-    Optional,
-    Sequence,
-    Dict,
-    Mapping,
-    Set,
-    Union,
-)
+from typing import Dict, Mapping, Optional, Sequence, Set, Union
 from urllib.parse import quote, urlparse
 
 import datacube.utils.uris as dc_uris
 
 from eodatasets3 import utils
 from eodatasets3.model import DEA_URI_PREFIX, Location
-from eodatasets3.properties import Eo3Interface, Eo3Dict
+from eodatasets3.properties import Eo3Dict, Eo3Interface
 
 # Needed when packaging zip or tar files.
 dc_uris.register_scheme("zip", "tar")
@@ -38,6 +31,11 @@ class LazyProductName:
                 c.producer_abbreviated,
                 f"{c.platform_abbreviated or ''}{instrument or ''}",
                 c.metadata.product_family,
+                (
+                    c.metadata.product_maturity
+                    if c.metadata.product_maturity != "stable"
+                    else None
+                ),
                 (
                     f"{c.displayed_collection_number}"
                     if (self.include_collection and c.displayed_collection_number)
